@@ -166,13 +166,17 @@ async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
 async function getPlaceList() {
   let accessToken;
   try {
+    console.log("Kaipany: Bắt đầu lấy token từ tokenManager...");
     accessToken = await tokenManager.getValidHanetToken();
+    console.log("Kaipany: Lấy token thành công, token:", accessToken ? accessToken.substring(0, 10) + '...' : 'null');
   } catch (refreshError) {
     console.error("Kaipany: Không thể lấy được token hợp lệ:", refreshError.message);
+    console.error("Kaipany: Chi tiết lỗi:", refreshError.stack);
     throw new Error(`Kaipany: Lỗi xác thực với HANET: ${refreshError.message}`);
   }
 
   if (!accessToken) {
+    console.error("Kaipany: Token trả về từ tokenManager là null hoặc rỗng");
     throw new Error("Kaipany: Không lấy được Access Token hợp lệ.");
   }
 
@@ -187,25 +191,45 @@ async function getPlaceList() {
 
   try {
     console.log("Kaipany: Đang gọi HANET API để lấy danh sách địa điểm...");
+    console.log("Kaipany: URL API:", apiUrl);
+    console.log("Kaipany: Request data:", { token: accessToken ? accessToken.substring(0, 10) + '...' : 'null' });
+    
     const response = await axios.post(apiUrl, qs.stringify(requestData), config);
+    
+    console.log("Kaipany: API response status:", response.status);
+    console.log("Kaipany: API response returnCode:", response.data?.returnCode);
     
     if (response.data && response.data.returnCode === 1) {
       console.log("Kaipany: Lấy danh sách địa điểm thành công.");
+      console.log("Kaipany: Số lượng địa điểm:", Array.isArray(response.data.data) ? response.data.data.length : 'unknown');
       return response.data.data || [];
     } else {
       console.error(
         "Kaipany: Lỗi khi lấy danh sách địa điểm từ HANET:",
-        response.data
+        JSON.stringify(response.data)
       );
       throw new Error(
         `Kaipany: Lỗi từ HANET API: ${response.data?.returnMessage || "Lỗi không xác định"}`
       );
     }
   } catch (error) {
-    console.error(
-      "Kaipany: Lỗi khi gọi API lấy danh sách địa điểm:",
-      error.response?.data || error.message
-    );
+    console.error("Kaipany: Lỗi khi gọi API lấy danh sách địa điểm:");
+    
+    if (error.response) {
+      // Lỗi từ phản hồi của server
+      console.error("Kaipany: Lỗi từ phản hồi của server:");
+      console.error("Kaipany: Status:", error.response.status);
+      console.error("Kaipany: Data:", JSON.stringify(error.response.data));
+      console.error("Kaipany: Headers:", JSON.stringify(error.response.headers));
+    } else if (error.request) {
+      // Lỗi không nhận được phản hồi
+      console.error("Kaipany: Không nhận được phản hồi từ server:", error.request);
+    } else {
+      // Lỗi khác
+      console.error("Kaipany: Lỗi chung:", error.message);
+    }
+    console.error("Kaipany: Stack trace:", error.stack);
+    
     throw new Error(`Kaipany: Không thể lấy danh sách địa điểm: ${error.message}`);
   }
 }
