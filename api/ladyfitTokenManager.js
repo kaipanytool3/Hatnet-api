@@ -9,6 +9,30 @@ const HANET_TOKEN_URL = process.env.LADYFIT_HANET_TOKEN_URL || "https://oauth.ha
 const HANET_CLIENT_ID = process.env.LADYFIT_HANET_CLIENT_ID;
 const HANET_CLIENT_SECRET = process.env.LADYFIT_HANET_CLIENT_SECRET;
 const HANET_REFRESH_TOKEN = process.env.LADYFIT_HANET_REFRESH_TOKEN;
+
+// Hiển thị cấu hình đang được sử dụng cho debug
+console.log("LADYFIT CONFIG:", {
+  TOKEN_URL: HANET_TOKEN_URL,
+  CLIENT_ID: HANET_CLIENT_ID ? HANET_CLIENT_ID.substring(0, 5) + '...' : undefined,
+  CLIENT_SECRET: HANET_CLIENT_SECRET ? HANET_CLIENT_SECRET.substring(0, 5) + '...' : undefined,
+  REFRESH_TOKEN: HANET_REFRESH_TOKEN ? HANET_REFRESH_TOKEN.substring(0, 10) + '...' : undefined,
+  EMAIL_IN_TOKEN: HANET_REFRESH_TOKEN ? decodeJWT(HANET_REFRESH_TOKEN) : 'Cannot decode token'
+});
+
+// Hàm giải mã JWT để hiển thị email từ token
+function decodeJWT(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(Buffer.from(base64, 'base64').toString().split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    const payload = JSON.parse(jsonPayload);
+    return payload.email || 'Email not found';
+  } catch (error) {
+    return 'Error decoding token';
+  }
+}
 console.log("LADYFIT ENV VARIABLES:", {
   TOKEN_URL: process.env.LADYFIT_HANET_TOKEN_URL,
   CLIENT_ID: process.env.LADYFIT_HANET_CLIENT_ID,

@@ -30,8 +30,8 @@ const App = () => {
         return `${process.env.REACT_APP_API_URL}/Kaipany/${path}`;
       case "ladyfit":
         return `${process.env.REACT_APP_API_URL}/Ladyfit/${path}`;
-      default: // legacy
-        return `${process.env.REACT_APP_API_URL}/api/${path}`;
+      default: // Thay vì sử dụng legacy, mặc định sử dụng Kaipany
+        return `${process.env.REACT_APP_API_URL}/Kaipany/${path}`;
     }
   };
 
