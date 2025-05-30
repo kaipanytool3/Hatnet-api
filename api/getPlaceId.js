@@ -1,7 +1,7 @@
 require("dotenv").config();
 const axios = require("axios");
 const qs = require("qs");
-const tokenManager = require("./tokenManager");
+const tokenManager = require("./kaipanyTokenManager");
 
 const HANET_API_BASE_URL = process.env.HANET_API_BASE_URL;
 
