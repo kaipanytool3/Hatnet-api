@@ -23,6 +23,8 @@ app.use(
     origin: [
       "https://client-i1vo1qjv7-fugboizzs-projects.vercel.app",
       "http://localhost:3000",
+      "https://hatnet-frontend.vercel.app",
+      "https://hatnet-frontend-iota.vercel.app",
     ],
   })
 );
