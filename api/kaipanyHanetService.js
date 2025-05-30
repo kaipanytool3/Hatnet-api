@@ -180,7 +180,7 @@ async function getPlaceList() {
     throw new Error("Kaipany: Không lấy được Access Token hợp lệ.");
   }
 
-  const apiUrl = `${HANET_API_BASE_URL}/getPlaceByToken`;
+  const apiUrl = `${HANET_API_BASE_URL}/api/getPlaceByToken`;
   const requestData = {
     token: accessToken,
   };
