@@ -153,7 +153,7 @@ async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, 
       from: dateFrom,
       to: dateTo,
       ...(devices && { devices: devices }),
-      size: 500,
+      size: 1000, // Tăng kích thước trang lên 1000 để lấy nhiều kết quả hơn mỗi trang
       page: index,
     };
     const config = {
