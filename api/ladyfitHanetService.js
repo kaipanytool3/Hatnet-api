@@ -25,7 +25,7 @@ function filterCheckinsByDay(data) {
         item.personName !== ""
     );
 
-    // Tạo một đối tượng tạm để theo dõi lần check-in đầu tiên và checkout cuối cùng của mỗi người theo ngày
+    // Tạo một đối tượng để theo dõi thông tin check-in và checkout của mỗi người theo ngày
     const personCheckins = {};
 
     validCheckins.forEach((checkin) => {
@@ -33,7 +33,7 @@ function filterCheckinsByDay(data) {
       const personKey = `${date}_${checkin.personID}`;
       const checkinTime = parseInt(checkin.checkinTime);
 
-      // Nếu chưa có thông tin cho person này, tạo mới
+      // Nếu chưa có thông tin về người này
       if (!personCheckins[personKey]) {
         personCheckins[personKey] = {
           personName: checkin.personName !== undefined ? checkin.personName : "",
@@ -49,18 +49,19 @@ function filterCheckinsByDay(data) {
           deviceID: checkin.deviceID !== undefined ? checkin.deviceID : "",
           deviceName: checkin.deviceName !== undefined ? checkin.deviceName : "",
           date: checkin.date,
-          checkinTime: checkinTime,  // Timestamp cho check-in sớm nhất
-          checkoutTime: checkinTime,  // Ban đầu checkout = checkin
+          // Lưu cả thời gian check-in và checkout
+          checkinTime: checkinTime,
+          checkoutTime: checkinTime,
           formattedCheckinTime: formatTimestamp(checkinTime),
           formattedCheckoutTime: formatTimestamp(checkinTime),
         };
       } else {
-        // Cập nhật thời gian check-in sớm nhất và check-out muộn nhất
+        // Cập nhật thời gian check-in sớm nhất
         if (checkinTime < personCheckins[personKey].checkinTime) {
           personCheckins[personKey].checkinTime = checkinTime;
           personCheckins[personKey].formattedCheckinTime = formatTimestamp(checkinTime);
         }
-        
+        // Cập nhật thời gian checkout muộn nhất
         if (checkinTime > personCheckins[personKey].checkoutTime) {
           personCheckins[personKey].checkoutTime = checkinTime;
           personCheckins[personKey].formattedCheckoutTime = formatTimestamp(checkinTime);
@@ -91,60 +92,15 @@ function formatTimestamp(timestamp) {
 async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
   let accessToken;
   try {
-    accessToken = await tokenManager.getValidHanetToken();
+    accessToken = await tokenManager.getValidLadyfitHanetToken();
   } catch (refreshError) {
-    console.error("Ladyfit: Không thể lấy được token hợp lệ:", refreshError.message);
-    throw new Error(`Ladyfit: Lỗi xác thực với HANET: ${refreshError.message}`);
+    console.error("Không thể lấy được token hợp lệ:", refreshError.message);
+    throw new Error(`Lỗi xác thực với HANET: ${refreshError.message}`);
   }
   if (!accessToken) {
-    throw new Error("Ladyfit: Không lấy được Access Token hợp lệ.");
+    throw new Error("Không lấy được Access Token hợp lệ.");
   }
-
-  // Chuyển đổi dateFrom, dateTo từ string sang số
-  const fromTime = parseInt(dateFrom);
-  const toTime = parseInt(dateTo);
-  
-  // Kiểm tra nếu khoảng thời gian > 30 ngày (2,592,000,000 milliseconds)
-  const MAX_TIME_RANGE = 30 * 24 * 60 * 60 * 1000; // 30 ngày
-  const timeRange = toTime - fromTime;
-  
   let rawCheckinData = [];
-  
-  // Nếu khoảng thời gian > 30 ngày, chia thành nhiều chu kỳ 30 ngày
-  if (timeRange > MAX_TIME_RANGE) {
-    console.log(`Ladyfit: Khoảng thời gian > 30 ngày, chia thành nhiều chu kỳ nhỏ hơn`);
-    
-    let currentStart = fromTime;
-    let chunks = 0;
-    
-    while (currentStart < toTime) {
-      // Tính điểm kết thúc cho chu kỳ hiện tại
-      let currentEnd = Math.min(currentStart + MAX_TIME_RANGE, toTime);
-      chunks++;
-      
-      console.log(`Ladyfit: Đang lấy dữ liệu chu kỳ #${chunks}: ${new Date(currentStart).toLocaleDateString()} - ${new Date(currentEnd).toLocaleDateString()}`);
-      
-      // Lấy dữ liệu cho chu kỳ hiện tại
-      const chunkData = await fetchCheckinDataForTimeRange(placeId, currentStart, currentEnd, devices, accessToken);
-      rawCheckinData = [...rawCheckinData, ...chunkData];
-      
-      // Tiến đến chu kỳ tiếp theo
-      currentStart = currentEnd + 1;
-    }
-    
-    console.log(`Ladyfit: Đã lấy dữ liệu từ tất cả ${chunks} chu kỳ, tổng cộng ${rawCheckinData.length} bản ghi`);
-  } else {
-    // Khoảng thời gian < 30 ngày, xử lý thông thường
-    console.log(`Ladyfit: Khoảng thời gian < 30 ngày, xử lý thông thường`);
-    rawCheckinData = await fetchCheckinDataForTimeRange(placeId, fromTime, toTime, devices, accessToken);
-  }
-  
-  return filterCheckinsByDay({ data: rawCheckinData });
-}
-
-async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, accessToken) {
-  let rawCheckinData = [];
-  
   for (let index = 1; index <= 100000; index++) {
     const apiUrl = `${HANET_API_BASE_URL}/person/getCheckinByPlaceIdInTimestamp`;
     const requestData = {
@@ -153,7 +109,7 @@ async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, 
       from: dateFrom,
       to: dateTo,
       ...(devices && { devices: devices }),
-      size: 1000, // Tăng kích thước trang lên 1000 để lấy nhiều kết quả hơn mỗi trang
+      size: 1000,
       page: index,
     };
     const config = {
@@ -161,11 +117,8 @@ async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, 
       timeout: 15000,
     };
 
-    console.log(`Ladyfit API URL: ${apiUrl}`);
-    console.log(`Ladyfit token used: ${accessToken.substring(0, 15)}...`);
-
     try {
-      console.log(`Ladyfit: Đang gọi HANET API cho placeID=${placeId}, trang ${index}...`);
+      console.log(`Đang gọi LADYFIT HANET API cho placeID=${placeId}, trang ${index}...`);
       const response = await axios.post(
         apiUrl,
         qs.stringify(requestData),
@@ -173,52 +126,52 @@ async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, 
       );
       if (response.data && typeof response.data.returnCode !== "undefined") {
         if (response.data.returnCode === 1 || response.data.returnCode === 0) {
-          console.log(`Ladyfit: Gọi HANET API thành công cho placeID=${placeId}.`);
+          console.log(`Gọi LADYFIT HANET API thành công cho placeID=${placeId}.`);
           if (Array.isArray(response.data.data)) {
             if (response.data.data.length === 0) {
               // Nếu trang không có dữ liệu, thoát vòng lặp
-              console.log(`Ladyfit: Không còn dữ liệu ở trang ${index}, dừng truy vấn.`);
+              console.log(`Không còn dữ liệu ở trang ${index}, dừng truy vấn.`);
               break;
             }
             rawCheckinData = [...rawCheckinData, ...response.data.data];
             console.log(
-              `Ladyfit: Đã nhận tổng cộng ${rawCheckinData.length} bản ghi check-in.`
+              `Đã nhận tổng cộng ${rawCheckinData.length} bản ghi check-in.`
             );
           } else {
             console.warn(
-              `Ladyfit: Dữ liệu trả về cho placeID ${placeId} không phải mảng hoặc không có.`
+              `Dữ liệu trả về cho placeID ${placeId} không phải mảng hoặc không có.`
             );
             break;
           }
         } else {
           console.error(
-            `Ladyfit: Lỗi logic từ HANET cho placeID=${placeId}: Mã lỗi ${
+            `Lỗi logic từ HANET cho placeID=${placeId}: Mã lỗi ${
               response.data.returnCode
             }, Thông điệp: ${response.data.returnMessage || "N/A"}`
           );
         }
       } else {
         console.error(
-          `Ladyfit: Response không hợp lệ từ HANET cho placeID=${placeId}:`,
+          `Response không hợp lệ từ HANET cho placeID=${placeId}:`,
           response.data
         );
       }
     } catch (error) {
       if (error.code === "ECONNABORTED") {
-        console.error(`Ladyfit: Lỗi timeout khi gọi API cho placeID=${placeId}.`);
+        console.error(`Lỗi timeout khi gọi API cho placeID=${placeId}.`);
       } else {
         console.error(
-          `Ladyfit: Lỗi mạng/request khi gọi ${apiUrl} cho placeID=${placeId}:`,
+          `Lỗi mạng/request khi gọi ${apiUrl} cho placeID=${placeId}:`,
           error.response?.data || error.message
         );
       }
       console.warn(
-        `Ladyfit: Không lấy được dữ liệu cho địa điểm ${placeId} do lỗi request.`
+        `Không lấy được dữ liệu cho địa điểm ${placeId} do lỗi request.`
       );
     }
   }
 
-  return rawCheckinData;
+  return filterCheckinsByDay({ data: rawCheckinData });
 }
 
 async function getPlaceList() {
