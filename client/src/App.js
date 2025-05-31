@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import "./App.css"; // Sẽ tạo file CSS riêng
 
 const App = () => {
   // Thêm state để theo dõi API đang được sử dụng
   const [activeApi, setActiveApi] = useState("legacy"); // "legacy", "kaipany", "ladyfit"
+  const initialMount = useRef(true);
 
   const [formData, setFormData] = useState({
     placeId: "",
@@ -24,7 +25,7 @@ const App = () => {
   const [queryString, setQueryString] = useState(null);
 
   // Function để lấy API endpoint đúng dựa trên API đang hoạt động
-  const getApiEndpoint = (path) => {
+  const getApiEndpoint = useCallback((path) => {
     switch (activeApi) {
       case "kaipany":
         return `${process.env.REACT_APP_API_URL}/Kaipany/${path}`;
@@ -33,7 +34,7 @@ const App = () => {
       default: // Thay vì sử dụng legacy, mặc định sử dụng Kaipany
         return `${process.env.REACT_APP_API_URL}/Kaipany/${path}`;
     }
-  };
+  }, [activeApi]);
 
   // Function xử lý khi thay đổi API
   const handleApiChange = (api) => {
@@ -81,6 +82,12 @@ const App = () => {
   }, [activeApi]);
 
   useEffect(() => {
+    // Skip the first render to prevent double API calls on initial load
+    if (initialMount.current) {
+      initialMount.current = false;
+      return;
+    }
+    // Only fetch places when activeApi changes, not on initial load
     fetchPlaces();
   }, [fetchPlaces]);
 
