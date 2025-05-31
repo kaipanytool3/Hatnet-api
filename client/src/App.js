@@ -392,7 +392,7 @@ const App = () => {
             type="text"
             id="summaryInput"
             readOnly
-            value={`${process.env.REACT_APP_API_URL}/api/checkins?${queryString}`}
+            value={`${getApiEndpoint("checkins")}?${queryString}`}
             className="summary-input"
           />
         </div>
