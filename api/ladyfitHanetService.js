@@ -176,7 +176,7 @@ async function getPlaceList() {
     throw new Error("Ladyfit: Không lấy được Access Token hợp lệ.");
   }
 
-  const apiUrl = `${HANET_API_BASE_URL}/place/getPlaceByToken`;
+  const apiUrl = `${HANET_API_BASE_URL}/place/getPlaces`;
   const requestData = {
     token: accessToken,
   };
