@@ -25,42 +25,52 @@ function filterCheckinsByDay(data) {
         item.personName !== ""
     );
 
-    // Tạo một đối tượng tạm để theo dõi lần check-in đầu tiên của mỗi người theo ngày
-    const earliestCheckinsByPerson = {};
+    // Tạo một đối tượng tạm để theo dõi lần check-in đầu tiên và checkout cuối cùng của mỗi người theo ngày
+    const personCheckins = {};
 
     validCheckins.forEach((checkin) => {
       const date = checkin.date;
       const personKey = `${date}_${checkin.personID}`;
+      const checkinTime = parseInt(checkin.checkinTime);
 
-      // Format thông tin người check-in
-      const personInfo = {
-        personName: checkin.personName !== undefined ? checkin.personName : "",
-        personID: checkin.personID,
-        aliasID: checkin.aliasID !== undefined ? checkin.aliasID : "",
-        placeID: checkin.placeID !== undefined ? checkin.placeID : null,
-        title: checkin.title
-          ? typeof checkin.title === "string"
-            ? checkin.title.trim()
-            : "N/A"
-          : "Khách hàng",
-        type: checkin.type !== undefined ? checkin.type : null,
-        deviceID: checkin.deviceID !== undefined ? checkin.deviceID : "",
-        deviceName: checkin.deviceName !== undefined ? checkin.deviceName : "",
-        date: checkin.date,
-        timestamp: checkin.checkinTime,
-        formattedTime: formatTimestamp(checkin.checkinTime),
-      };
-
-      if (
-        !earliestCheckinsByPerson[personKey] ||
-        checkin.checkinTime < earliestCheckinsByPerson[personKey].timestamp
-      ) {
-        earliestCheckinsByPerson[personKey] = personInfo;
+      // Nếu chưa có thông tin cho person này, tạo mới
+      if (!personCheckins[personKey]) {
+        personCheckins[personKey] = {
+          personName: checkin.personName !== undefined ? checkin.personName : "",
+          personID: checkin.personID,
+          aliasID: checkin.aliasID !== undefined ? checkin.aliasID : "",
+          placeID: checkin.placeID !== undefined ? checkin.placeID : null,
+          title: checkin.title
+            ? typeof checkin.title === "string"
+              ? checkin.title.trim()
+              : "N/A"
+            : "Khách hàng",
+          type: checkin.type !== undefined ? checkin.type : null,
+          deviceID: checkin.deviceID !== undefined ? checkin.deviceID : "",
+          deviceName: checkin.deviceName !== undefined ? checkin.deviceName : "",
+          date: checkin.date,
+          checkinTime: checkinTime,  // Timestamp cho check-in sớm nhất
+          checkoutTime: checkinTime,  // Ban đầu checkout = checkin
+          formattedCheckinTime: formatTimestamp(checkinTime),
+          formattedCheckoutTime: formatTimestamp(checkinTime),
+        };
+      } else {
+        // Cập nhật thời gian check-in sớm nhất và check-out muộn nhất
+        if (checkinTime < personCheckins[personKey].checkinTime) {
+          personCheckins[personKey].checkinTime = checkinTime;
+          personCheckins[personKey].formattedCheckinTime = formatTimestamp(checkinTime);
+        }
+        
+        if (checkinTime > personCheckins[personKey].checkoutTime) {
+          personCheckins[personKey].checkoutTime = checkinTime;
+          personCheckins[personKey].formattedCheckoutTime = formatTimestamp(checkinTime);
+        }
       }
     });
 
-    const result = Object.values(earliestCheckinsByPerson).sort(
-      (a, b) => a.timestamp - b.timestamp
+    // Sắp xếp kết quả theo thời gian check-in
+    const result = Object.values(personCheckins).sort(
+      (a, b) => a.checkinTime - b.checkinTime
     );
 
     return result;

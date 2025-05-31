@@ -440,6 +440,7 @@ const App = () => {
                     <th>AliasID</th>
                     <th>Chức vụ</th>
                     <th>Thời gian Checkin</th>
+                    <th>Thời gian Checkout</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -451,8 +452,13 @@ const App = () => {
                       <td>{result.aliasID || "N/A"}</td>
                       <td>{result.title || "N/A"}</td>
                       <td>
-                        {result.checkinTime
-                          ? new Date(result.checkinTime).toLocaleString("vi-VN")
+                        {result.checkinTime && !isNaN(new Date(result.checkinTime).getTime())
+                          ? new Date(parseInt(result.checkinTime)).toLocaleString("vi-VN")
+                          : "N/A"}
+                      </td>
+                      <td>
+                        {result.checkoutTime && !isNaN(new Date(result.checkoutTime).getTime())
+                          ? new Date(parseInt(result.checkoutTime)).toLocaleString("vi-VN")
                           : "N/A"}
                       </td>
                     </tr>
