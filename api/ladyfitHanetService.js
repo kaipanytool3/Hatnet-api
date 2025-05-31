@@ -113,7 +113,8 @@ async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
   }
 
   // Chuyển đổi dateFrom, dateTo từ string sang số
-  const fromTime = parseInt(dateFrom);
+  // Điều chỉnh lấy thêm 1 ngày trước để đảm bảo có dữ liệu đầu tháng
+  const fromTime = parseInt(dateFrom) - (24 * 60 * 60 * 1000); // trừ 1 ngày để đảm bảo lấy dữ liệu đầu tháng
   const toTime = parseInt(dateTo);
   
   // Tối ưu hóa khoảng thởi gian cho môi trường Serverless
@@ -124,36 +125,113 @@ async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
   const timeRange = toTime - fromTime;
   const totalDays = Math.ceil(timeRange / ONE_DAY);
   
-  // Điều chỉnh kích thước đoạn dựa trên tổng thởi gian truy vấn
-  let CHUNK_SIZE;
-  if (totalDays > 180) { // > 6 tháng
-    CHUNK_SIZE = 60 * ONE_DAY; // Đoạn 60 ngày
-  } else {
-    CHUNK_SIZE = 30 * ONE_DAY; // Đoạn 30 ngày mặc định
+  // Giải pháp triệt để: Sử dụng đoạn thời gian ngắn để đảm bảo không bỏ sót dữ liệu
+  // Giảm xuống còn 3 ngày mỗi đoạn để đảm bảo dữ liệu hoàn toàn đầy đủ
+  const CHUNK_SIZE = 3 * ONE_DAY; // Luôn sử dụng đoạn 3 ngày
+  
+  // Tạo danh sách các đoạn theo tháng để đảm bảo không bỏ sót tháng nào
+  const chunkList = [];
+  
+  // Trước tiên, tạo các đoạn chia theo chu kỳ 7 ngày
+  let tmpStart = fromTime;
+  while (tmpStart < toTime) {
+    let tmpEnd = Math.min(tmpStart + CHUNK_SIZE, toTime);
+    chunkList.push({ start: tmpStart, end: tmpEnd });
+    tmpStart = tmpEnd;
   }
   
-  console.log(`Ladyfit: Truy vấn cho ${totalDays} ngày, chia thành các đoạn ${Math.ceil(CHUNK_SIZE / ONE_DAY)} ngày`);
+  // Sau đó, thêm các đoạn cho từng tháng từ fromTime đến toTime
+  // Để đảm bảo lấy đủ dữ liệu của mỗi tháng
+  tmpStart = new Date(fromTime);
+  tmpStart.setDate(1); // Ngày đầu tiên của tháng
+  tmpStart.setHours(0, 0, 0, 0);
+  
+  while (tmpStart.getTime() < toTime) {
+    // Đầu tháng
+    const monthStart = new Date(tmpStart);
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    
+    // Cuối tháng
+    const monthEnd = new Date(tmpStart);
+    monthEnd.setMonth(monthEnd.getMonth() + 1);
+    monthEnd.setDate(0); // Ngày cuối cùng của tháng hiện tại
+    monthEnd.setHours(23, 59, 59, 999);
+    
+    // Chỉ thêm đoạn nếu nằm trong khoảng thời gian yêu cầu
+    const actualStart = Math.max(monthStart.getTime(), fromTime);
+    const actualEnd = Math.min(monthEnd.getTime(), toTime);
+    
+    if (actualStart < actualEnd) {
+      // Thêm đoạn toàn bộ tháng
+      chunkList.push({ start: actualStart, end: actualEnd, isMonthChunk: true });
+      
+      // Thêm các đoạn nhỏ hơn (tuần đầu, giữa và cuối tháng)
+      // Tuần đầu tháng
+      chunkList.push({ start: actualStart, end: Math.min(actualStart + 7 * ONE_DAY, actualEnd), isWeekChunk: true });
+      
+      // Giữa tháng
+      if (actualEnd - actualStart > 14 * ONE_DAY) {
+        const midStart = new Date(monthStart);
+        midStart.setDate(10); // Khoảng giữa tháng
+        midStart.setHours(0, 0, 0, 0);
+        const midEnd = new Date(midStart);
+        midEnd.setDate(midStart.getDate() + 7);
+        midEnd.setHours(23, 59, 59, 999);
+        
+        chunkList.push({ 
+          start: Math.max(midStart.getTime(), actualStart), 
+          end: Math.min(midEnd.getTime(), actualEnd),
+          isMiddleChunk: true
+        });
+      }
+      
+      // Tuần cuối tháng
+      if (actualEnd - actualStart > 7 * ONE_DAY) {
+        const endWeekStart = new Date(monthEnd);
+        endWeekStart.setDate(monthEnd.getDate() - 6); // 7 ngày cuối tháng
+        endWeekStart.setHours(0, 0, 0, 0);
+        
+        chunkList.push({ 
+          start: Math.max(endWeekStart.getTime(), actualStart), 
+          end: actualEnd,
+          isEndChunk: true
+        });
+      }
+    }
+    
+    // Chuyển sang tháng tiếp theo
+    tmpStart.setMonth(tmpStart.getMonth() + 1);
+  }
+  
+  // Đảm bảo không có lỗ hổng giữa các đoạn
+  const OVERLAP_HOURS = 48; // 2 ngày đầy đủ để chồng lấp - tăng lên để đảm bảo không bỏ sót
+  
+  console.log(`Ladyfit: Truy vấn cho ${totalDays} ngày, sử dụng ${chunkList.length} đoạn thời gian`);
+  console.log(`Ladyfit: Bao gồm ${chunkList.filter(c => c.isMonthChunk).length} đoạn theo tháng, ${chunkList.filter(c => !c.isMonthChunk && !c.isWeekChunk && !c.isMiddleChunk && !c.isEndChunk).length} đoạn 7 ngày, và các đoạn đặc biệt khác`);
   
   let rawCheckinData = [];
-  
-  // Thực hiện truy vấn từng đoạn thởi gian
-  let currentStart = fromTime;
   let chunks = 0;
   let totalResults = 0;
   
-  while (currentStart < toTime) {
+  // Thực hiện truy vấn cho từng đoạn thời gian trong danh sách
+  for (const chunk of chunkList) {
     chunks++;
-    // Tính điểm kết thúc cho chu kỳ hiện tại
-    let currentEnd = Math.min(currentStart + CHUNK_SIZE, toTime);
+    const currentStart = chunk.start;
+    const currentEnd = chunk.end;
+    const chunkType = chunk.isMonthChunk ? "tháng" : (chunk.isWeekChunk ? "tuần đầu" : (chunk.isMiddleChunk ? "giữa tháng" : (chunk.isEndChunk ? "cuối tháng" : "chuẩn")));
     
     // Kiểm tra tính hợp lệ của timestamp trước khi gọi API
     if (isNaN(currentStart) || isNaN(currentEnd)) {
-      console.error(`Ladyfit: Timestamp không hợp lệ cho đoạn #${chunks}: currentStart=${currentStart}, currentEnd=${currentEnd}`);
-      currentStart = currentEnd; // Bỏ qua đoạn này nếu timestamp không hợp lệ
+      console.error(`Ladyfit: Timestamp không hợp lệ cho đoạn #${chunks}/${chunkList.length} (${chunkType}): currentStart=${currentStart}, currentEnd=${currentEnd}`);
       continue;
     }
     
-    console.log(`Ladyfit: Đang lấy dữ liệu đoạn #${chunks}/${Math.ceil(timeRange/CHUNK_SIZE)}: ${new Date(currentStart).toLocaleDateString()} - ${new Date(currentEnd).toLocaleDateString()}`);
+    // Kiểm tra trùng lập với các đoạn đã lấy
+    const startDate = new Date(currentStart).toLocaleDateString();
+    const endDate = new Date(currentEnd).toLocaleDateString();
+    
+    console.log(`Ladyfit: Đang lấy dữ liệu đoạn #${chunks}/${chunkList.length} (${chunkType}): ${startDate} - ${endDate}`);
     
     try {
       // Lấy dữ liệu cho đoạn hiện tại
@@ -163,21 +241,65 @@ async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
       totalResults += chunkData.length;
       rawCheckinData = [...rawCheckinData, ...chunkData];
       
-      console.log(`Ladyfit: Hoàn thành đoạn #${chunks} - Nhận được ${chunkData.length} kết quả (Tổng: ${totalResults})`);
+      console.log(`Ladyfit: Đã lấy ${chunkData.length} bản ghi cho đoạn #${chunks} (${chunkType}): ${startDate} - ${endDate}`);
     } catch (error) {
-      console.error(`Ladyfit: Lỗi khi lấy dữ liệu cho đoạn #${chunks}:`, error.message);
+      console.error(`Ladyfit: Lỗi khi lấy dữ liệu cho đoạn #${chunks} (${chunkType}):`, error.message);
     }
-    
-    // Tiến đến chu kỳ tiếp theo
-    currentStart = currentEnd;
   }
   
-  console.log(`Ladyfit: Đã lấy dữ liệu từ tất cả ${chunks} chu kỳ, tổng cộng ${rawCheckinData.length} bản ghi`); 
+  console.log(`Ladyfit: Đã lấy dữ liệu từ tất cả ${chunks}/${chunkList.length} đoạn, tổng cộng ${rawCheckinData.length} bản ghi trước khi loại trùng`); 
   
-  console.log(`Ladyfit: Đã lấy xong tất cả dữ liệu, tổng số bản ghi: ${rawCheckinData.length}`);
+  // Loại bỏ bản ghi trùng lập (vì chúng ta có thể lấy dữ liệu trùng khi thực hiện các đoạn chồng lấp)
+  const uniqueCheckins = [];
+  const checkinMap = new Map();
+  
+  for (const checkin of rawCheckinData) {
+    if (!checkin.checkinTime || !checkin.personID) continue;
+    
+    const key = `${checkin.personID}_${checkin.checkinTime}`;
+    if (!checkinMap.has(key)) {
+      checkinMap.set(key, true);
+      uniqueCheckins.push(checkin);
+    }
+  }
+  
+  console.log(`Ladyfit: Sau khi loại trùng, còn ${uniqueCheckins.length}/${rawCheckinData.length} bản ghi duy nhất`);
+  
+  // Cập nhật lại dữ liệu sau khi loại trùng
+  rawCheckinData = uniqueCheckins;
   
   // Xử lý và lọc dữ liệu check-in theo ngày
-  const result = filterCheckinsByDay({ data: rawCheckinData });
+  // Vì chúng ta đã mở rộng phạm vi thêm 1 ngày trước, chúng ta cần lọc lại để chỉ lấy dữ liệu trong khoảng ban đầu
+  const originalFromTime = parseInt(dateFrom); // Lưu lại thời gian ban đầu để lọc
+  
+  // Lọc ra các bản ghi nằm trong khoảng thời gian ban đầu
+  const filteredRawData = rawCheckinData.filter(checkin => {
+    if (!checkin.checkinTime) return false;
+    const checkinTimeInt = parseInt(checkin.checkinTime);
+    return !isNaN(checkinTimeInt) && checkinTimeInt >= originalFromTime && checkinTimeInt <= toTime;
+  });
+  
+  console.log(`Ladyfit: Sau khi lọc, còn ${filteredRawData.length}/${rawCheckinData.length} bản ghi trong khoảng thời gian ban đầu`);
+  
+  // Xử lý và lọc dữ liệu check-in theo ngày
+  const result = filterCheckinsByDay({ data: filteredRawData });
+  
+  // Kiểm tra và ghi log cảnh báo nếu dữ liệu trả về ít hơn dự kiến
+  const uniqueDates = new Set();
+  result.forEach(item => {
+    if (item.date) uniqueDates.add(item.date);
+  });
+  
+  const expectedDays = Math.ceil((toTime - fromTime) / ONE_DAY);
+  const actualDays = uniqueDates.size;
+  const coveragePercent = (actualDays / expectedDays * 100).toFixed(2);
+  
+  console.log(`Ladyfit: Phạm vi dữ liệu: ${actualDays}/${expectedDays} ngày (${coveragePercent}%)`);
+  console.log(`Ladyfit: Các ngày có dữ liệu: ${Array.from(uniqueDates).sort().join(', ')}`);
+  
+  if (actualDays < expectedDays * 0.5) {
+    console.warn(`Ladyfit: Cảnh báo! Chỉ lấy được dữ liệu cho ${actualDays}/${expectedDays} ngày (${coveragePercent}%). Nhiều dữ liệu có thể đã bị mất.`);
+  }
   
   // Ghi nhận thởi gian hoàn thành và thông báo
   const processingTime = (Date.now() - startTime) / 1000;
@@ -206,14 +328,33 @@ async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, 
       throw new Error('Timestamp không hợp lệ');
     }
     
-    // Log ra giá trị thởi gian đã chuyển đổi để debug
-    console.log(`Ladyfit: Timestamp đã chuyển đổi: from=${fromTimestamp} (${new Date(fromTimestamp).toISOString()}), to=${toTimestamp} (${new Date(toTimestamp).toISOString()})`);
+    // Đảm bảo fromTimestamp là đầu ngày (00:00:00) và toTimestamp là cuối ngày (23:59:59)
+    // Điều này giúp tránh vấn đề múi giờ và đảm bảo lấy đủ dữ liệu trong ngày
+    const fromDate = new Date(fromTimestamp);
+    const toDate = new Date(toTimestamp);
+    
+    // Chỉnh fromDate về đầu ngày nếu chưa phải
+    if (fromDate.getHours() !== 0 || fromDate.getMinutes() !== 0 || fromDate.getSeconds() !== 0) {
+      fromDate.setHours(0, 0, 0, 0);
+    }
+    
+    // Chỉnh toDate về cuối ngày nếu chưa phải
+    if (toDate.getHours() !== 23 || toDate.getMinutes() !== 59 || toDate.getSeconds() !== 59) {
+      toDate.setHours(23, 59, 59, 999);
+    }
+    
+    // Cập nhật timestamp sau khi đã chuẩn hóa
+    const adjustedFromTimestamp = fromDate.getTime();
+    const adjustedToTimestamp = toDate.getTime();
+  
+    // Log ra giá trị thởi gian đã chuyển đổi và chuẩn hóa để debug
+    console.log(`Ladyfit: Timestamp đã chuẩn hóa: from=${adjustedFromTimestamp} (${new Date(adjustedFromTimestamp).toISOString()}), to=${adjustedToTimestamp} (${new Date(adjustedToTimestamp).toISOString()})`);
     
     const requestData = {
       token: accessToken,
       placeID: placeId,
-      from: fromTimestamp,
-      to: toTimestamp,
+      from: adjustedFromTimestamp, // Sử dụng timestamp đã chuẩn hóa
+      to: adjustedToTimestamp,     // Sử dụng timestamp đã chuẩn hóa
       ...(devices && { devices: devices }),
       size: 1000, // Tăng kích thước trang lên 1000 để lấy nhiều kết quả hơn mỗi trang
       page: index,
@@ -243,7 +384,9 @@ async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, 
               console.log(`Ladyfit: Không có dữ liệu ở trang ${index}, đã gặp ${emptyPagesCount} trang trống.`);
               
               // Chỉ dừng nếu gặp nhiều trang trống liên tiếp
-              if (emptyPagesCount >= 3) {
+              // Tăng số lượng trang trống cần gặp trước khi dừng lên 5 để đảm bảo không bỏ sót
+              // Đôi khi dữ liệu có thể phân bố không đều giữa các trang
+              if (emptyPagesCount >= 5) {
                 console.log(`Ladyfit: Đã gặp ${emptyPagesCount} trang trống liên tiếp, dừng truy vấn.`);
                 break;
               }
@@ -278,23 +421,62 @@ async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, 
         );
       }
     } catch (error) {
+      // Cải thiện xử lý lỗi - không dừng truy vấn ngay khi gặp lỗi
+      // Thử lại vài lần trước khi bỏ qua
+      const maxRetries = 3;
+      let retryCount = 0;
+      let retrySuccess = false;
+      
       if (error.code === "ECONNABORTED") {
-        console.error(`Ladyfit: Lỗi timeout khi gọi API cho placeID=${placeId}.`);
-      } else if (error.response?.data?.returnCode === -2020) {
-        // Xử lý lỗi invalid input datetime
-        console.error(`Ladyfit: Lỗi timestamp không hợp lệ (returnCode=-2020) khi gọi API cho placeID=${placeId}:`, {
-          requestData: requestData,
-          errorMessage: error.response?.data?.returnMessage
-        });
+        console.error(`Ladyfit: Lỗi timeout khi gọi API cho placeID=${placeId}, trang ${index}. Thử lại...`);
+      } else if (error.response) {
+        console.error(
+          `Ladyfit: HTTP Error khi gọi API cho placeID=${placeId}, trang ${index}: ${error.response.status} - ${error.response.statusText}. Thử lại...`
+        );
       } else {
-        // Xử lý các lỗi khác
-        console.error(`Ladyfit: Lỗi mạng/request khi gọi ${apiUrl} cho placeID=${placeId}:`,
-          error.response?.data || error.message
+        console.error(
+          `Ladyfit: Lỗi không xác định khi gọi API cho placeID=${placeId}, trang ${index}:`,
+          error.message,
+          '. Thử lại...'
         );
       }
       console.warn(
         `Ladyfit: Không lấy được dữ liệu cho địa điểm ${placeId} do lỗi request.`
       );
+      
+      // Chỉ thử lại nếu là lỗi mạng hoặc timeout
+      if (error.code === "ECONNABORTED" || (error.response && (error.response.status >= 500 || error.response.status === 429))) {
+        while (retryCount < maxRetries && !retrySuccess) {
+          try {
+            retryCount++;
+            console.log(`Ladyfit: Đang thử lại lần ${retryCount}/${maxRetries} cho placeID=${placeId}, trang ${index}...`);
+            
+            // Chờ một khoảng thời gian trước khi thử lại (backoff tăng dần)
+            await new Promise(resolve => setTimeout(resolve, retryCount * 2000));
+            
+            const retryResponse = await axios.post(
+              apiUrl,
+              qs.stringify(requestData),
+              config
+            );
+            
+            if (retryResponse.data && 
+                (retryResponse.data.returnCode === 1 || retryResponse.data.returnCode === 0) &&
+                Array.isArray(retryResponse.data.data)) {
+              
+              rawCheckinData = [...rawCheckinData, ...retryResponse.data.data];
+              console.log(`Ladyfit: Thử lại thành công, đã nhận ${retryResponse.data.data.length} bản ghi.`);
+              retrySuccess = true;
+            }
+          } catch (retryError) {
+            console.error(`Ladyfit: Thử lại lần ${retryCount} thất bại:`, retryError.message);
+          }
+        }
+      }
+      
+      // Nếu đã thử lại nhưng vẫn thất bại, chỉ bỏ qua trang này, không dừng toàn bộ quá trình truy vấn
+      console.warn(`Ladyfit: Bỏ qua trang ${index} do lỗi. Tiếp tục với trang tiếp theo...`);
+      continue;
     }
   }
 
