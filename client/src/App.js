@@ -124,7 +124,7 @@ const App = () => {
     } finally {
       setIsDevicesLoading(false);
     }
-  }, []);
+  }, [getApiEndpoint]);
 
   useEffect(() => {
     fetchDevices(formData.placeId);
