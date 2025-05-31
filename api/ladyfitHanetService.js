@@ -99,7 +99,52 @@ async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
   if (!accessToken) {
     throw new Error("Ladyfit: Không lấy được Access Token hợp lệ.");
   }
+
+  // Chuyển đổi dateFrom, dateTo từ string sang số
+  const fromTime = parseInt(dateFrom);
+  const toTime = parseInt(dateTo);
+  
+  // Kiểm tra nếu khoảng thời gian > 30 ngày (2,592,000,000 milliseconds)
+  const MAX_TIME_RANGE = 30 * 24 * 60 * 60 * 1000; // 30 ngày
+  const timeRange = toTime - fromTime;
+  
   let rawCheckinData = [];
+  
+  // Nếu khoảng thời gian > 30 ngày, chia thành nhiều chu kỳ 30 ngày
+  if (timeRange > MAX_TIME_RANGE) {
+    console.log(`Ladyfit: Khoảng thời gian > 30 ngày, chia thành nhiều chu kỳ nhỏ hơn`);
+    
+    let currentStart = fromTime;
+    let chunks = 0;
+    
+    while (currentStart < toTime) {
+      // Tính điểm kết thúc cho chu kỳ hiện tại
+      let currentEnd = Math.min(currentStart + MAX_TIME_RANGE, toTime);
+      chunks++;
+      
+      console.log(`Ladyfit: Đang lấy dữ liệu chu kỳ #${chunks}: ${new Date(currentStart).toLocaleDateString()} - ${new Date(currentEnd).toLocaleDateString()}`);
+      
+      // Lấy dữ liệu cho chu kỳ hiện tại
+      const chunkData = await fetchCheckinDataForTimeRange(placeId, currentStart, currentEnd, devices, accessToken);
+      rawCheckinData = [...rawCheckinData, ...chunkData];
+      
+      // Tiến đến chu kỳ tiếp theo
+      currentStart = currentEnd + 1;
+    }
+    
+    console.log(`Ladyfit: Đã lấy dữ liệu từ tất cả ${chunks} chu kỳ, tổng cộng ${rawCheckinData.length} bản ghi`);
+  } else {
+    // Khoảng thời gian < 30 ngày, xử lý thông thường
+    console.log(`Ladyfit: Khoảng thời gian < 30 ngày, xử lý thông thường`);
+    rawCheckinData = await fetchCheckinDataForTimeRange(placeId, fromTime, toTime, devices, accessToken);
+  }
+  
+  return filterCheckinsByDay({ data: rawCheckinData });
+}
+
+async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, accessToken) {
+  let rawCheckinData = [];
+  
   for (let index = 1; index <= 100000; index++) {
     const apiUrl = `${HANET_API_BASE_URL}/person/getCheckinByPlaceIdInTimestamp`;
     const requestData = {
@@ -116,8 +161,11 @@ async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
       timeout: 15000,
     };
 
+    console.log(`Ladyfit API URL: ${apiUrl}`);
+    console.log(`Ladyfit token used: ${accessToken.substring(0, 15)}...`);
+
     try {
-      console.log(`Ladyfit: Đang gọi HANET API cho placeID=${placeId}...`);
+      console.log(`Ladyfit: Đang gọi HANET API cho placeID=${placeId}, trang ${index}...`);
       const response = await axios.post(
         apiUrl,
         qs.stringify(requestData),
@@ -170,7 +218,7 @@ async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
     }
   }
 
-  return filterCheckinsByDay({ data: rawCheckinData });
+  return rawCheckinData;
 }
 
 async function getPlaceList() {
