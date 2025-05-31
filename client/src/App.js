@@ -78,7 +78,7 @@ const App = () => {
     } finally {
       setIsPlacesLoading(false);
     }
-  }, []);
+  }, [activeApi, getApiEndpoint]);
 
   useEffect(() => {
     fetchPlaces();
