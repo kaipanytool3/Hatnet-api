@@ -247,7 +247,7 @@ async function getDeviceList(placeId) {
     throw new Error("Kaipany: Không lấy được Access Token hợp lệ.");
   }
 
-  const apiUrl = `${HANET_API_BASE_URL}/device/getDeviceByPlaceId`;
+  const apiUrl = `${HANET_API_BASE_URL}/device/getListDeviceByPlace`;
   const requestData = {
     token: accessToken,
     placeID: placeId,
