@@ -235,6 +235,9 @@ async function getDeviceList(placeId) {
 
   try {
     console.log(`Ladyfit: Đang gọi HANET API để lấy danh sách thiết bị cho placeID=${placeId}...`);
+    console.log(`Ladyfit: URL API: ${apiUrl}`);
+    console.log(`Ladyfit: Token: ${accessToken ? accessToken.substring(0, 10) + '...' : 'null'}`);
+    
     const response = await axios.post(apiUrl, qs.stringify(requestData), config);
     
     if (response.data && response.data.returnCode === 1) {
