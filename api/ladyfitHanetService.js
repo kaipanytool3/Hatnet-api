@@ -89,6 +89,18 @@ function formatTimestamp(timestamp) {
 }
 
 async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
+  if (!placeId) {
+    throw new Error("Thiếu tham số placeId");
+  }
+
+  if (!dateFrom || !dateTo) {
+    throw new Error("Thiếu tham số dateFrom hoặc dateTo");
+  }
+
+  // Ghi nhận thởi điểm bắt đầu truy vấn để theo dõi thời gian xử lý
+  const startTime = Date.now();
+  console.log(`Ladyfit: Bắt đầu truy vấn cho placeId=${placeId} từ ${new Date(parseInt(dateFrom)).toLocaleDateString()} đến ${new Date(parseInt(dateTo)).toLocaleDateString()}`);
+
   let accessToken;
   try {
     accessToken = await tokenManager.getValidHanetToken();
@@ -104,58 +116,104 @@ async function getPeopleListByMethod(placeId, dateFrom, dateTo, devices) {
   const fromTime = parseInt(dateFrom);
   const toTime = parseInt(dateTo);
   
-  // Kiểm tra nếu khoảng thời gian > 30 ngày (2,592,000,000 milliseconds)
-  const MAX_TIME_RANGE = 30 * 24 * 60 * 60 * 1000; // 30 ngày
+  // Tối ưu hóa khoảng thởi gian cho môi trường Serverless
+  const ONE_DAY = 24 * 60 * 60 * 1000; // 1 ngày = 86,400,000 ms
+  
+  // Tính toán khoảng thởi gian tối ưu dựa vào độ dài của khoảng thởi gian
+  // Nếu truy vấn cho một năm (365 ngày), chúng ta sẽ chia thành các đoạn lớn hơn
   const timeRange = toTime - fromTime;
+  const totalDays = Math.ceil(timeRange / ONE_DAY);
+  
+  // Điều chỉnh kích thước đoạn dựa trên tổng thởi gian truy vấn
+  let CHUNK_SIZE;
+  if (totalDays > 180) { // > 6 tháng
+    CHUNK_SIZE = 60 * ONE_DAY; // Đoạn 60 ngày
+  } else {
+    CHUNK_SIZE = 30 * ONE_DAY; // Đoạn 30 ngày mặc định
+  }
+  
+  console.log(`Ladyfit: Truy vấn cho ${totalDays} ngày, chia thành các đoạn ${Math.ceil(CHUNK_SIZE / ONE_DAY)} ngày`);
   
   let rawCheckinData = [];
   
-  // Nếu khoảng thời gian > 30 ngày, chia thành nhiều chu kỳ 30 ngày
-  if (timeRange > MAX_TIME_RANGE) {
-    console.log(`Ladyfit: Khoảng thời gian > 30 ngày, chia thành nhiều chu kỳ nhỏ hơn`);
+  // Thực hiện truy vấn từng đoạn thởi gian
+  let currentStart = fromTime;
+  let chunks = 0;
+  let totalResults = 0;
+  
+  while (currentStart < toTime) {
+    chunks++;
+    // Tính điểm kết thúc cho chu kỳ hiện tại
+    let currentEnd = Math.min(currentStart + CHUNK_SIZE, toTime);
     
-    let currentStart = fromTime;
-    let chunks = 0;
-    
-    while (currentStart < toTime) {
-      // Tính điểm kết thúc cho chu kỳ hiện tại
-      let currentEnd = Math.min(currentStart + MAX_TIME_RANGE, toTime);
-      chunks++;
-      
-      console.log(`Ladyfit: Đang lấy dữ liệu chu kỳ #${chunks}: ${new Date(currentStart).toLocaleDateString()} - ${new Date(currentEnd).toLocaleDateString()}`);
-      
-      // Lấy dữ liệu cho chu kỳ hiện tại
-      const chunkData = await fetchCheckinDataForTimeRange(placeId, currentStart, currentEnd, devices, accessToken);
-      rawCheckinData = [...rawCheckinData, ...chunkData];
-      
-      // Tiến đến chu kỳ tiếp theo
-      currentStart = currentEnd + 1;
+    // Kiểm tra tính hợp lệ của timestamp trước khi gọi API
+    if (isNaN(currentStart) || isNaN(currentEnd)) {
+      console.error(`Ladyfit: Timestamp không hợp lệ cho đoạn #${chunks}: currentStart=${currentStart}, currentEnd=${currentEnd}`);
+      currentStart = currentEnd; // Bỏ qua đoạn này nếu timestamp không hợp lệ
+      continue;
     }
     
-    console.log(`Ladyfit: Đã lấy dữ liệu từ tất cả ${chunks} chu kỳ, tổng cộng ${rawCheckinData.length} bản ghi`);
-  } else {
-    // Khoảng thời gian < 30 ngày, xử lý thông thường
-    console.log(`Ladyfit: Khoảng thời gian < 30 ngày, xử lý thông thường`);
-    rawCheckinData = await fetchCheckinDataForTimeRange(placeId, fromTime, toTime, devices, accessToken);
+    console.log(`Ladyfit: Đang lấy dữ liệu đoạn #${chunks}/${Math.ceil(timeRange/CHUNK_SIZE)}: ${new Date(currentStart).toLocaleDateString()} - ${new Date(currentEnd).toLocaleDateString()}`);
+    
+    try {
+      // Lấy dữ liệu cho đoạn hiện tại
+      const chunkData = await fetchCheckinDataForTimeRange(placeId, currentStart, currentEnd, devices, accessToken);
+      
+      // Thêm dữ liệu vào kết quả
+      totalResults += chunkData.length;
+      rawCheckinData = [...rawCheckinData, ...chunkData];
+      
+      console.log(`Ladyfit: Hoàn thành đoạn #${chunks} - Nhận được ${chunkData.length} kết quả (Tổng: ${totalResults})`);
+    } catch (error) {
+      console.error(`Ladyfit: Lỗi khi lấy dữ liệu cho đoạn #${chunks}:`, error.message);
+    }
+    
+    // Tiến đến chu kỳ tiếp theo
+    currentStart = currentEnd;
   }
   
-  return filterCheckinsByDay({ data: rawCheckinData });
+  console.log(`Ladyfit: Đã lấy dữ liệu từ tất cả ${chunks} chu kỳ, tổng cộng ${rawCheckinData.length} bản ghi`); 
+  
+  console.log(`Ladyfit: Đã lấy xong tất cả dữ liệu, tổng số bản ghi: ${rawCheckinData.length}`);
+  
+  // Xử lý và lọc dữ liệu check-in theo ngày
+  const result = filterCheckinsByDay({ data: rawCheckinData });
+  
+  // Ghi nhận thởi gian hoàn thành và thông báo
+  const processingTime = (Date.now() - startTime) / 1000;
+  console.log(`Ladyfit: Hoàn thành xử lý trong ${processingTime.toFixed(2)} giây, trả về ${result.length} kết quả đã lọc`);
+  
+  return result;
 }
 
 async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, accessToken) {
   let rawCheckinData = [];
   
-  // Tăng số trang tối đa để đảm bảo lấy hết kết quả
-  const MAX_PAGES = 1000000;
+  // Tăng số trang tối đa để đảm bảo lấy hết kết quả, nhưng giới hạn ở một mức hợp lý
+  // Giới hạn MAX_PAGES để tránh truy vấn quá nhiều trang không cần thiết
+  const MAX_PAGES = 50000;
   let emptyPagesCount = 0;
   
   for (let index = 1; index <= MAX_PAGES; index++) {
     const apiUrl = `${HANET_API_BASE_URL}/person/getCheckinByPlaceIdInTimestamp`;
+    // Đảm bảo timestamp là số nguyên
+    const fromTimestamp = parseInt(dateFrom);
+    const toTimestamp = parseInt(dateTo);
+    
+    // Kiểm tra tính hợp lệ của timestamp
+    if (isNaN(fromTimestamp) || isNaN(toTimestamp)) {
+      console.error(`Ladyfit: Timestamp không hợp lệ: from=${dateFrom}, to=${dateTo}`);
+      throw new Error('Timestamp không hợp lệ');
+    }
+    
+    // Log ra giá trị thởi gian đã chuyển đổi để debug
+    console.log(`Ladyfit: Timestamp đã chuyển đổi: from=${fromTimestamp} (${new Date(fromTimestamp).toISOString()}), to=${toTimestamp} (${new Date(toTimestamp).toISOString()})`);
+    
     const requestData = {
       token: accessToken,
       placeID: placeId,
-      from: dateFrom,
-      to: dateTo,
+      from: fromTimestamp,
+      to: toTimestamp,
       ...(devices && { devices: devices }),
       size: 1000, // Tăng kích thước trang lên 1000 để lấy nhiều kết quả hơn mỗi trang
       page: index,
@@ -222,9 +280,15 @@ async function fetchCheckinDataForTimeRange(placeId, dateFrom, dateTo, devices, 
     } catch (error) {
       if (error.code === "ECONNABORTED") {
         console.error(`Ladyfit: Lỗi timeout khi gọi API cho placeID=${placeId}.`);
+      } else if (error.response?.data?.returnCode === -2020) {
+        // Xử lý lỗi invalid input datetime
+        console.error(`Ladyfit: Lỗi timestamp không hợp lệ (returnCode=-2020) khi gọi API cho placeID=${placeId}:`, {
+          requestData: requestData,
+          errorMessage: error.response?.data?.returnMessage
+        });
       } else {
-        console.error(
-          `Ladyfit: Lỗi mạng/request khi gọi ${apiUrl} cho placeID=${placeId}:`,
+        // Xử lý các lỗi khác
+        console.error(`Ladyfit: Lỗi mạng/request khi gọi ${apiUrl} cho placeID=${placeId}:`,
           error.response?.data || error.message
         );
       }
